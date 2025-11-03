@@ -1,0 +1,27 @@
+bundle:
+  name: sample-bundle
+
+targets:
+  dev:
+    mode: development
+    workspace:
+      host: ${env.DATABRICKS_HOST}
+  prod:
+    mode: production
+    workspace:
+      host: ${env.DATABRICKS_HOST}
+
+resources:
+  jobs:
+    hello_job:
+      name: "hello from bundles"
+      tasks:
+        - task_key: hello
+          notebook_task:
+            notebook_path: ./notebooks/hello.py
+          job_cluster_key: small
+      job_clusters:
+        - job_cluster_key: small
+          new_cluster:
+            spark_version: "14.3.x-scala2.12"
+            num_workers: 1
