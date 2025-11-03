@@ -1,0 +1,168 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  # Populate these securely via pipeline variables or variable groups.
+  - name: AZ_SUBSCRIPTION_ID
+    value: ''
+  - name: AZ_RESOURCE_GROUP_FOR_STATE
+    value: ''
+  - name: AZ_STORAGE_ACCOUNT_FOR_STATE
+    value: ''
+  - name: AZ_STORAGE_CONTAINER_FOR_STATE
+    value: ''
+  - name: TF_STATE_KEY
+    value: ''
+  - name: DATABRICKS_HOST
+    value: ''
+  - name: DATABRICKS_AZURE_RESOURCE_ID
+    value: ''
+  - name: BUNDLE_TARGET
+    value: 'dev'
+
+stages:
+- stage: Setup
+  displayName: 'Setup agent prerequisites'
+  jobs:
+    - job: Bootstrap
+      displayName: 'Bootstrap tooling'
+      pool:
+        name: 'SelfHosted-Windows'
+      steps:
+        - powershell: |
+            Set-StrictMode -Version Latest
+            $ErrorActionPreference = 'Stop'
+            $bootstrapScript = Join-Path "$(System.DefaultWorkingDirectory)" 'scripts\\00-bootstrap-prereqs.ps1'
+            if (-not (Test-Path $bootstrapScript)) {
+              throw "Bootstrap script not found at $bootstrapScript"
+            }
+            if (Test-Path "$Env:ProgramFiles\\Databricks\\bin\\databricks.exe") {
+              Write-Host 'Databricks CLI already detected. Skipping bootstrap (script remains idempotent).'
+            } else {
+              & $bootstrapScript
+            }
+          displayName: 'Run 00-bootstrap-prereqs.ps1 (idempotent)'
+          pwsh: true
+
+- stage: Terraform
+  displayName: 'Terraform plan and apply'
+  dependsOn: Setup
+  jobs:
+    - job: TerraformPlanApply
+      displayName: 'Terraform init/plan/apply'
+      pool:
+        name: 'SelfHosted-Windows'
+      steps:
+        - task: AzureCLI@2
+          displayName: 'Terraform init/plan/apply via AzureCLI@2 (OIDC)'
+          inputs:
+            azureSubscription: '<AZDO_SERVICE_CONNECTION>'
+            scriptType: 'pscore'
+            scriptLocation: 'inlineScript'
+            useGlobalConfig: true
+            workingDirectory: '$(System.DefaultWorkingDirectory)'
+            inlineScript: |
+              Set-StrictMode -Version Latest
+              $ErrorActionPreference = 'Stop'
+
+              & "$(System.DefaultWorkingDirectory)\scripts\01-configure-terraform.ps1"
+
+              Push-Location "$(System.DefaultWorkingDirectory)\terraform"
+
+              terraform init `
+                -backend-config="subscription_id=$(AZ_SUBSCRIPTION_ID)" `
+                -backend-config="resource_group_name=$(AZ_RESOURCE_GROUP_FOR_STATE)" `
+                -backend-config="storage_account_name=$(AZ_STORAGE_ACCOUNT_FOR_STATE)" `
+                -backend-config="container_name=$(AZ_STORAGE_CONTAINER_FOR_STATE)" `
+                -backend-config="key=$(TF_STATE_KEY)"
+
+              terraform plan -out tfplan
+
+              if ($env:BUILD_REASON -eq 'PullRequest') {
+                Write-Host 'Pull Request detected. Skipping terraform apply.'
+              } else {
+                terraform apply -auto-approve tfplan
+              }
+
+              Pop-Location
+
+        # Service principal + client secret example using AzureCLI@2
+        - task: AzureCLI@2
+          displayName: 'Example: capture SP credentials (disabled)'
+          condition: and(succeeded(), false)
+          inputs:
+            azureSubscription: '<AZDO_SERVICE_CONNECTION>'
+            scriptType: 'pscore'
+            scriptLocation: 'inlineScript'
+            useGlobalConfig: true
+            addSpnToEnvironment: true
+            inlineScript: |
+              Write-Host "##vso[task.setvariable variable=ARM_CLIENT_ID;issecret=true]$env:servicePrincipalId"
+              Write-Host "##vso[task.setvariable variable=ARM_CLIENT_SECRET;issecret=true]$env:servicePrincipalKey"
+              Write-Host "##vso[task.setvariable variable=ARM_TENANT_ID;issecret=true]$env:tenantId"
+
+        - powershell: |
+            # Example follow-up step showing how to leverage captured SP credentials.
+            # Enable this step together with the previous AzureCLI@2 block when using client secret auth.
+            Set-StrictMode -Version Latest
+            $ErrorActionPreference = 'Stop'
+            $env:ARM_CLIENT_ID = '$(ARM_CLIENT_ID)'
+            $env:ARM_CLIENT_SECRET = '$(ARM_CLIENT_SECRET)'
+            $env:ARM_TENANT_ID = '$(ARM_TENANT_ID)'
+            $env:DATABRICKS_HOST = '$(DATABRICKS_HOST)'
+            & "$(System.DefaultWorkingDirectory)\scripts\02-configure-databricks-cli.ps1" -AuthMode ServicePrincipal
+            # databricks bundle validate
+          displayName: 'Example: Databricks CLI using service principal secrets (disabled)'
+          condition: and(succeeded(), false)
+          pwsh: true
+
+- stage: DatabricksBundles
+  displayName: 'Databricks Asset Bundle deployment'
+  dependsOn: Terraform
+  jobs:
+    - job: DeployBundles
+      displayName: 'Validate and deploy Databricks bundle'
+      pool:
+        name: 'SelfHosted-Windows'
+      steps:
+        - task: AzureCLI@2
+          displayName: 'Configure Databricks CLI via AzureCLI@2 (OIDC)'
+          inputs:
+            azureSubscription: '<AZDO_SERVICE_CONNECTION>'
+            scriptType: 'pscore'
+            scriptLocation: 'inlineScript'
+            useGlobalConfig: true
+            workingDirectory: '$(System.DefaultWorkingDirectory)'
+            inlineScript: |
+              Set-StrictMode -Version Latest
+              $ErrorActionPreference = 'Stop'
+
+              & "$(System.DefaultWorkingDirectory)\scripts\02-configure-databricks-cli.ps1" -AuthMode OIDC -DatabricksHost "$(DATABRICKS_HOST)"
+
+              $env:DATABRICKS_HOST = "$(DATABRICKS_HOST)"
+
+              databricks bundle validate
+              databricks bundle plan -t "$(BUNDLE_TARGET)"
+              databricks bundle deploy -t "$(BUNDLE_TARGET)" --auto-approve
+              # databricks bundle run -t "$(BUNDLE_TARGET)" <job_key>
+
+        - powershell: |
+            # Managed Identity example (disabled). Ensure the agent VM has a managed identity with access.
+            Set-StrictMode -Version Latest
+            $ErrorActionPreference = 'Stop'
+            $env:ARM_USE_MSI = 'true'
+            $env:ARM_CLIENT_ID = '$(ARM_CLIENT_ID)'
+            $env:DATABRICKS_AZURE_RESOURCE_ID = '$(DATABRICKS_AZURE_RESOURCE_ID)'
+            $env:DATABRICKS_HOST = '$(DATABRICKS_HOST)'
+            & "$(System.DefaultWorkingDirectory)\scripts\02-configure-databricks-cli.ps1" -AuthMode ManagedIdentity -SkipCurrentUserValidation
+            # databricks bundle validate
+          displayName: 'Example: Databricks CLI using managed identity (disabled)'
+          condition: and(succeeded(), false)
+          pwsh: true

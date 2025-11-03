@@ -1,0 +1,5 @@
+subscription_id     = "<AZ_SUBSCRIPTION_ID>"
+resource_group_name = "<AZ_RESOURCE_GROUP_FOR_STATE>"
+storage_account_name= "<AZ_STORAGE_ACCOUNT_FOR_STATE>"
+container_name      = "<AZ_STORAGE_CONTAINER_FOR_STATE>"
+key                 = "<TF_STATE_KEY>"
