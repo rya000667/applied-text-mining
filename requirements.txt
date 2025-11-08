@@ -1,0 +1,9 @@
+azure-functions
+azure-identity>=1.13.0
+azure-keyvault-secrets>=4.7.0
+azure-storage-blob>=12.16.0
+azure-eventhub>=5.11.0
+msal>=1.24.0
+requests>=2.31.0
+tenacity>=8.2.0
+pytest>=7.4.0

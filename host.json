@@ -1,0 +1,18 @@
+{
+  "version": "2.0",
+  "logging": {
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true
+      }
+    }
+  },
+  "extensions": {
+    "timers": {
+      "schedule": "0 */5 * * * *",
+      "scheduleMonitor": {
+        "useMonitor": true
+      }
+    }
+  }
+}

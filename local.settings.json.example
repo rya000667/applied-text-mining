@@ -1,0 +1,19 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "TIMER_SCHEDULE": "0 */30 * * * *",
+    "TENANT_ID": "00000000-0000-0000-0000-000000000000",
+    "CLIENT_ID": "00000000-0000-0000-0000-000000000000",
+    "KEYVAULT_URL": "https://mykv.vault.azure.net",
+    "KEYVAULT_SECRET_NAME": "powerbi-sp-secret",
+    "STORAGE_ACCOUNT_URL": "https://mystorage.blob.core.windows.net",
+    "STATE_CONTAINER": "state",
+    "EVENTHUB_FQDN": "mynamespace.servicebus.windows.net",
+    "EVENTHUB_NAME": "fabric-events",
+    "OVERLAP_SECONDS": "60",
+    "REQUEST_TIMEOUT_SECONDS": "30",
+    "MAX_RETRIES": "5"
+  }
+}
